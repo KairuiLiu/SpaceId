@@ -1,4 +1,20 @@
-# macOS space indicator
+# SpaceId for yabai
+
+This is my personal build of [SpaceId](https://github.com/dshnkao/SpaceId), adapted for managing Spaces with [yabai](https://github.com/asmvik/yabai).
+
+Features:
+- Shows every Space with an application window and hides inactive empty Spaces.
+- Lets you name Spaces, with Nerd Font support.
+- Left-click a Space label to switch directly to that Space.
+- Scroll over the menu bar item to move between Spaces with windows, including Spaces on other displays.
+
+<img src="./images/m.png" width="300">
+
+<img src="./images/n.png" width="300">
+
+If you do not use [yabai](https://github.com/asmvik/yabai), please download the original [SpaceId](https://github.com/dshnkao/SpaceId).
+
+# Original SpaceId README
 
 ![](https://raw.githubusercontent.com/dshnkao/SpaceId/master/images/a.png)
 ![](https://raw.githubusercontent.com/dshnkao/SpaceId/master/images/b.png)

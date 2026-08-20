@@ -9,20 +9,22 @@
 import Foundation
 
 class Preference {
-    
     static let icon = "iconPref"
     enum Icon: Int {
         case one
         case perMonitor
         case perSpace
     }
-    
+
     static let color = "colorPref"
     enum Color: Int {
         case whiteOnBlack
         case blackOnWhite
     }
-    
+
+    static let fontFamily = "fontFamilyPref"
+    static let spaceNames = "spaceNames"
+
     enum App: String {
         case updateOnLeftClick
         case updateOnAppSwitch

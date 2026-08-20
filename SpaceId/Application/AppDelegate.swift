@@ -6,9 +6,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, ReloadDelegate {
     let spaceIdentifier = SpaceIdentifier()
     let observer = Observer()
     let statusItem = StatusItem()
-    let buttonImage = ButtonImage()
+    private var updateWorkItem: DispatchWorkItem?
     
     func applicationDidFinishLaunching(_ aNotification: Notification) {
+        UserDefaults.standard.register(defaults: [
+            Preference.icon: Preference.Icon.perSpace.rawValue,
+            Preference.color: Preference.Color.whiteOnBlack.rawValue
+        ])
         PFMoveToApplicationsFolderIfNecessary ()
         statusItem.delegate = self
         NSApp.setActivationPolicy(.accessory)
@@ -24,11 +28,20 @@ class AppDelegate: NSObject, NSApplicationDelegate, ReloadDelegate {
         statusItem.createMenu()
         updateSpaceNumber(())
     }
+
+    func refresh() {
+        updateSpaceNumber(())
+    }
     
     private func updateSpaceNumber(_ : Any) {
-        usleep(10000)
-        let info = spaceIdentifier.getSpaceInfo()
-        statusItem.updateMenuImage(spaceInfo: info)
+        updateWorkItem?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self = self else { return }
+            let info = self.spaceIdentifier.getSpaceInfo()
+            self.statusItem.updateMenuImage(spaceInfo: info)
+        }
+        updateWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(10), execute: workItem)
     }
     
     private func setLoginItem() {
@@ -45,5 +58,5 @@ class AppDelegate: NSObject, NSApplicationDelegate, ReloadDelegate {
 
 protocol ReloadDelegate {
     func reload()
+    func refresh()
 }
-

@@ -1,130 +1,169 @@
 import Cocoa
 import Foundation
 
+struct ButtonImageSegment {
+    let space: Space
+    let frame: NSRect
+}
+
+struct ButtonImageLayout {
+    let image: NSImage
+    let segments: [ButtonImageSegment]
+}
+
 class ButtonImage {
     
-    private let size = CGSize(width: 16, height: 16)
+    private let height: CGFloat = 17
+    private let minimumWidth: CGFloat = 16
+    private let horizontalPadding: CGFloat = 4
+    private let spacing: CGFloat = 5
     private let defaults = UserDefaults.standard
-    typealias F = (ButtonImage) -> (SpaceInfo) -> NSImage
     
-    func createImage(spaceInfo: SpaceInfo) -> NSImage {
-        guard let icon = Preference.Icon(rawValue: defaults.integer(forKey: Preference.icon)),
-              let color = Preference.Color(rawValue: defaults.integer(forKey: Preference.color))
-        else { return oneIcon(spaceInfo: spaceInfo, color: Preference.Color.blackOnWhite) }
+    func createLayout(spaceInfo: SpaceInfo) -> ButtonImageLayout {
+        let names = defaults.dictionary(forKey: Preference.spaceNames) as? [String: String] ?? [:]
+        let icon = Preference.Icon(rawValue: defaults.integer(forKey: Preference.icon)) ?? .perSpace
+        let color = Preference.Color(rawValue: defaults.integer(forKey: Preference.color)) ?? .whiteOnBlack
         let underline = defaults.bool(forKey: Preference.App.underlineActiveMonitor.rawValue)
-        switch icon {
-        case Preference.Icon.one:
-            return oneIcon(spaceInfo: spaceInfo, color: color)
-        case Preference.Icon.perMonitor:
-            return perMonitor(spaceInfo: spaceInfo, color: color, underlineActiveMonitor: underline)
-        case Preference.Icon.perSpace:
-            return perSpace(spaceInfo: spaceInfo, color: color, underlineActiveMonitor: underline)
-        }
-    }
 
-    private func colorF(color: Preference.Color) -> (String, CGFloat, Bool) -> NSImage {
-        switch color {
-        case Preference.Color.blackOnWhite:
-            return blackOnWhite
-        case Preference.Color.whiteOnBlack:
-            return whiteOnBlack
+        switch icon {
+        case .one:
+            guard let current = spaceInfo.keyboardFocusSpace else {
+                return emptyLayout()
+            }
+            let image = labelImage(text: displayName(for: current, names: names),
+                                   color: color,
+                                   alpha: 1,
+                                   underline: false)
+            return ButtonImageLayout(
+                image: image,
+                segments: [ButtonImageSegment(space: current,
+                                              frame: NSRect(origin: .zero, size: image.size))]
+            )
+
+        case .perMonitor:
+            let spaces = spaceInfo.activeSpaces.sorted { $0.order < $1.order }
+            let icons = spaces.map { space in
+                (space: space,
+                 image: labelImage(text: displayName(for: space, names: names),
+                                   color: color,
+                                   alpha: 1,
+                                   underline: underline && space.uuid == spaceInfo.keyboardFocusSpace?.uuid))
+            }
+            return combine(icons: icons)
+
+        case .perSpace:
+            let currentUUID = spaceInfo.keyboardFocusSpace?.uuid
+            let spaces = spaceInfo.allSpaces.filter {
+                // Keep the visible Space from every display. Previously this only
+                // kept the keyboard-focus Space, so an empty visible Space on a
+                // secondary display disappeared from the item on the main display.
+                $0.isActive || $0.uuid == currentUUID || $0.hasApplicationWindows
+            }
+            let icons = spaces.map { space in
+                (space: space,
+                 image: labelImage(text: displayName(for: space, names: names),
+                                   color: color,
+                                   alpha: space.isActive ? 1 : 0.3,
+                                   underline: underline && space.uuid == currentUUID))
+            }
+            return combine(icons: icons)
         }
     }
 
     private func textAttributes(color: NSColor, underline: Bool) -> [NSAttributedString.Key: Any] {
-        let font = NSFont.boldSystemFont(ofSize: 11)
         let paragraphStyle = NSMutableParagraphStyle()
         paragraphStyle.alignment = NSTextAlignment.center
         
-        return [ .font: font,
+        return [ .font: labelFont(),
                  .foregroundColor: color,
                  .paragraphStyle: paragraphStyle,
-                 .underlineStyle: underline
+                 .underlineStyle: underline ? NSUnderlineStyle.single.rawValue : 0
                ]
     }
-    
-    private func blackOnWhite(text: String, alpha: CGFloat = 1, underline: Bool) -> NSImage {
-        let rect = NSRect(x: 0, y: 0, width: size.width, height: size.height)
+
+    private func labelImage(text: String,
+                            color: Preference.Color,
+                            alpha: CGFloat,
+                            underline: Bool) -> NSImage {
+        let drawingColor = NSColor(white: 0, alpha: alpha)
+        let attributes = textAttributes(color: drawingColor, underline: underline)
+        let textWidth = ceil((text as NSString).size(withAttributes: attributes).width)
+        let width = max(minimumWidth, textWidth + horizontalPadding * 2)
+        let size = CGSize(width: width, height: height)
+        let rect = NSRect(origin: .zero, size: size)
         let image = NSImage(size: size)
-        let color = NSColor.init(white: 0, alpha: alpha)
-        let path = NSBezierPath(roundedRect: rect, xRadius: 1, yRadius: 1)
-        image.lockFocus()
-        color.set()
-        path.lineWidth = 2
-        path.stroke()
-        text.drawVerticallyCentered(in: rect, withAttributes: textAttributes(color: color, underline: underline))
-        image.unlockFocus()
-        image.isTemplate = true
-        return image
-    }
-    
-    private func whiteOnBlack(text: String, alpha: CGFloat, underline: Bool) -> NSImage {
-        let rect = NSRect(x: 0, y: 0, width: size.width, height: size.height)
-        let image = NSImage(size: size)
-        let image1 = NSImage(size: size)
-        let image2 = NSImage(size: size)
-        let color = NSColor.init(white: 1, alpha: alpha)
-        
-        image1.lockFocus()
-        color.set()
-        let path = NSBezierPath(roundedRect: rect, xRadius: 3, yRadius: 3)
-        path.fill()
-        image1.unlockFocus()
-        
-        image2.lockFocus()
-        text.drawVerticallyCentered(in: rect, withAttributes: textAttributes(color: NSColor.black, underline: underline))
-        image2.unlockFocus()
 
         image.lockFocus()
-        image1.draw(in: rect, from: NSZeroRect, operation: NSCompositingOperation.sourceOut, fraction: 1.0)
-        image2.draw(in: rect, from: NSZeroRect, operation: NSCompositingOperation.destinationOut, fraction: 1.0)
+        switch color {
+        case .whiteOnBlack:
+            drawingColor.setFill()
+            NSBezierPath(roundedRect: rect, xRadius: 3, yRadius: 3).fill()
+            NSGraphicsContext.current?.compositingOperation = .destinationOut
+            text.drawVerticallyCentered(
+                in: rect,
+                withAttributes: textAttributes(color: .black, underline: underline))
+
+        case .blackOnWhite:
+            drawingColor.setStroke()
+            let path = NSBezierPath(roundedRect: rect.insetBy(dx: 1, dy: 1),
+                                    xRadius: 2,
+                                    yRadius: 2)
+            path.lineWidth = 2
+            path.stroke()
+            text.drawVerticallyCentered(in: rect, withAttributes: attributes)
+        }
         image.unlockFocus()
-        
         image.isTemplate = true
         return image
     }
-    
-    private func combine(icons: [NSImage], count: Int) -> NSImage {
-        let width = size.width * CGFloat(count) + CGFloat(2 * (count - 1))
-        let image = NSImage(size: CGSize(width: width, height: size.height))
+
+    private func combine(icons: [(space: Space, image: NSImage)]) -> ButtonImageLayout {
+        guard !icons.isEmpty else { return emptyLayout() }
+        let width = icons.reduce(0) { $0 + $1.image.size.width } + spacing * CGFloat(icons.count - 1)
+        let image = NSImage(size: CGSize(width: width, height: height))
+        var segments: [ButtonImageSegment] = []
         image.lockFocus()
         var x: CGFloat = 0
-        for i in icons {
-            i.draw(at: NSPoint(x: x, y: 0), from: NSZeroRect, operation: NSCompositingOperation.color, fraction: 1.0)
-            x += size.width + 2
+        for icon in icons {
+            icon.image.draw(at: NSPoint(x: x, y: 0),
+                            from: .zero,
+                            operation: .sourceOver,
+                            fraction: 1)
+            segments.append(ButtonImageSegment(
+                space: icon.space,
+                frame: NSRect(x: x, y: 0, width: icon.image.size.width, height: height)
+            ))
+            x += icon.image.size.width + spacing
         }
         image.unlockFocus()
         image.isTemplate = true
-        return image
+        return ButtonImageLayout(image: image, segments: segments)
     }
-    
-    private func oneIcon(spaceInfo: SpaceInfo, color: Preference.Color) -> NSImage {
-        return colorF(color: color)(getTextForSpace(space: spaceInfo.keyboardFocusSpace), 1, false)
-    }
-    
-    private func perMonitor(spaceInfo:SpaceInfo, color: Preference.Color, underlineActiveMonitor: Bool) -> NSImage {
-        let spaces = spaceInfo.activeSpaces.sorted{ $0.order < $1.order }
-        let icons = spaces.map {
-            colorF(color: color)(getTextForSpace(space: $0), 1, underlineActiveMonitor ? $0.uuid == spaceInfo.keyboardFocusSpace?.uuid : false)
+
+    private func displayName(for space: Space, names: [String: String]) -> String {
+        if let name = names[space.uuid], !name.isEmpty {
+            return name
         }
-        return combine(icons: icons, count: spaces.count)
+        return space.number.map(String.init) ?? "F"
     }
-    
-    private func perSpace(spaceInfo: SpaceInfo, color: Preference.Color, underlineActiveMonitor: Bool) -> NSImage {
-        let icons = spaceInfo.allSpaces.map {
-            colorF(color: color)(getTextForSpace(space: $0), getAlpha(space: $0), underlineActiveMonitor ? $0.uuid == spaceInfo.keyboardFocusSpace?.uuid : false)
+
+    private func labelFont() -> NSFont {
+        guard let family = defaults.string(forKey: Preference.fontFamily), !family.isEmpty else {
+            return NSFont.boldSystemFont(ofSize: 11)
         }
-        return combine(icons: icons, count: spaceInfo.allSpaces.count)
+        let manager = NSFontManager.shared
+        return manager.font(withFamily: family,
+                            traits: .boldFontMask,
+                            weight: 5,
+                            size: 11)
+            ?? manager.font(withFamily: family, traits: [], weight: 5, size: 11)
+            ?? NSFont.boldSystemFont(ofSize: 11)
     }
-    
-    private func getAlpha(space: Space) -> CGFloat {
-        return space.isActive ? 1 : 0.3
+
+    private func emptyLayout() -> ButtonImageLayout {
+        return ButtonImageLayout(image: NSImage(size: CGSize(width: minimumWidth, height: height)),
+                                 segments: [])
     }
-    
-    private func getTextForSpace(space: Space?) -> String {
-        return space.map { $0.number.map { String($0) } ?? "F" } ?? "0"
-    }
-    
 }
 
 extension NSString {

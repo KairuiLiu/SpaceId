@@ -9,6 +9,7 @@ class Observer {
     var monitor = false
     var activeApp: NSObjectProtocol?
     var leftMouseClick: Any?
+    var refreshTimer: Timer?
     
     func setupObservers(using: @escaping (Any) -> Void) {
         removeActiveApplicationEvent()
@@ -20,6 +21,11 @@ class Observer {
         if !monitor {
             addMonitorEvent(using: using)
             monitor = true
+        }
+        if refreshTimer == nil {
+            refreshTimer = Timer.scheduledTimer(withTimeInterval: 2,
+                                                repeats: true,
+                                                block: using)
         }
         
         if defaults.bool(forKey: Preference.App.updateOnAppSwitch.rawValue) {
