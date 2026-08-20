@@ -20,7 +20,7 @@ class ButtonImage {
     private let defaults = UserDefaults.standard
     
     func createLayout(spaceInfo: SpaceInfo) -> ButtonImageLayout {
-        let names = defaults.dictionary(forKey: Preference.spaceNames) as? [String: String] ?? [:]
+        let labels = defaults.dictionary(forKey: Preference.indexLabels) as? [String: String] ?? [:]
         let icon = Preference.Icon(rawValue: defaults.integer(forKey: Preference.icon)) ?? .perSpace
         let color = Preference.Color(rawValue: defaults.integer(forKey: Preference.color)) ?? .whiteOnBlack
         let underline = defaults.bool(forKey: Preference.App.underlineActiveMonitor.rawValue)
@@ -30,7 +30,7 @@ class ButtonImage {
             guard let current = spaceInfo.keyboardFocusSpace else {
                 return emptyLayout()
             }
-            let image = labelImage(text: displayName(for: current, names: names),
+            let image = labelImage(text: displayLabel(for: current, labels: labels),
                                    color: color,
                                    alpha: 1,
                                    underline: false)
@@ -44,7 +44,7 @@ class ButtonImage {
             let spaces = spaceInfo.activeSpaces.sorted { $0.order < $1.order }
             let icons = spaces.map { space in
                 (space: space,
-                 image: labelImage(text: displayName(for: space, names: names),
+                 image: labelImage(text: displayLabel(for: space, labels: labels),
                                    color: color,
                                    alpha: 1,
                                    underline: underline && space.uuid == spaceInfo.keyboardFocusSpace?.uuid))
@@ -61,7 +61,7 @@ class ButtonImage {
             }
             let icons = spaces.map { space in
                 (space: space,
-                 image: labelImage(text: displayName(for: space, names: names),
+                 image: labelImage(text: displayLabel(for: space, labels: labels),
                                    color: color,
                                    alpha: space.isActive ? 1 : 0.3,
                                    underline: underline && space.uuid == currentUUID))
@@ -140,11 +140,13 @@ class ButtonImage {
         return ButtonImageLayout(image: image, segments: segments)
     }
 
-    private func displayName(for space: Space, names: [String: String]) -> String {
-        if let name = names[space.uuid], !name.isEmpty {
-            return name
-        }
-        return space.number.map(String.init) ?? "F"
+    private func displayLabel(for space: Space, labels: [String: String]) -> String {
+        guard let index = space.number else { return "F" }
+        let key = String(index)
+        // Labels belong to the numeric position. A Space UUID can move to a
+        // different position when Spaces are reordered, so it must not be used
+        // as the preference key.
+        return labels[key].flatMap { $0.isEmpty ? nil : $0 } ?? key
     }
 
     private func labelFont() -> NSFont {

@@ -23,7 +23,8 @@ class Preference {
     }
 
     static let fontFamily = "fontFamilyPref"
-    static let spaceNames = "spaceNames"
+    static let indexLabels = "spaceLabelsByIndex"
+    static let maxIndexCount = "maxIndexCount"
 
     enum App: String {
         case updateOnLeftClick

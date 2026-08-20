@@ -11,7 +11,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, ReloadDelegate {
     func applicationDidFinishLaunching(_ aNotification: Notification) {
         UserDefaults.standard.register(defaults: [
             Preference.icon: Preference.Icon.perSpace.rawValue,
-            Preference.color: Preference.Color.whiteOnBlack.rawValue
+            Preference.color: Preference.Color.whiteOnBlack.rawValue,
+            Preference.maxIndexCount: 10
         ])
         PFMoveToApplicationsFolderIfNecessary ()
         statusItem.delegate = self

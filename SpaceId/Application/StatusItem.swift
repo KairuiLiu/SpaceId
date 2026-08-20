@@ -11,7 +11,7 @@ class StatusItem: NSObject {
     private var currentButtonLayout = ButtonImageLayout(image: NSImage(size: .zero), segments: [])
     private var contextMenu = NSMenu()
     private var menuSignature = ""
-    private var namesPanelController: SpaceNamesPanelController?
+    private var labelsPanelController: IndexLabelsPanelController?
     private var scrollEventMonitor: Any?
     private var globalScrollEventMonitor: Any?
     private var lastScrollSwitchTime: TimeInterval = 0
@@ -65,20 +65,19 @@ class StatusItem: NSObject {
 
     private func menuItems() -> NSMenu {
         let menu = NSMenu()
-        let manageNames = NSMenuItem(title: "Manage Space Names…",
-                                     action: #selector(openNamesPanel(_:)),
-                                     keyEquivalent: "")
+        let manageLabels = NSMenuItem(title: "Manage Index Icons…",
+                                      action: #selector(openLabelsPanel(_:)),
+                                      keyEquivalent: "")
         let pref = NSMenuItem(title: "Preferences", action: nil, keyEquivalent: "")
         let opt = NSMenuItem(title: "Options", action: nil, keyEquivalent: "")
         let quit = NSMenuItem(title: "Quit", action: #selector(quit(_:)), keyEquivalent: "")
-        manageNames.target = self
-        manageNames.isEnabled = !currentSpaceInfo.allSpaces.isEmpty
+        manageLabels.target = self
         quit.target = self
 
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") ?? "0"
         menu.addItem(NSMenuItem(title: "v\(version)", action: nil, keyEquivalent: ""))
         menu.addItem(NSMenuItem.separator())
-        menu.addItem(manageNames)
+        menu.addItem(manageLabels)
         menu.addItem(pref)
         menu.setSubmenu(preferenceMenu(), for: pref)
         menu.addItem(opt)
@@ -196,39 +195,34 @@ class StatusItem: NSObject {
             ?? manager.font(withFamily: family, traits: [], weight: 5, size: size)
     }
 
-    @objc private func openNamesPanel(_ sender: NSMenuItem) {
-        let spaces = currentSpaceInfo.allSpaces
-        guard !spaces.isEmpty else { return }
-
-        namesPanelController?.close()
-        let names = defaults.dictionary(forKey: Preference.spaceNames) as? [String: String] ?? [:]
-        let controller = SpaceNamesPanelController(
-            spaces: spaces,
-            names: names,
-            currentUUID: currentSpaceInfo.keyboardFocusSpace?.uuid
-        ) { [weak self] updatedNames in
-            self?.saveSpaceNames(updatedNames, for: spaces)
+    @objc private func openLabelsPanel(_ sender: NSMenuItem) {
+        labelsPanelController?.close()
+        let labels = defaults.dictionary(forKey: Preference.indexLabels) as? [String: String] ?? [:]
+        let maxIndexCount = max(1, defaults.integer(forKey: Preference.maxIndexCount))
+        let controller = IndexLabelsPanelController(
+            labels: labels,
+            maxIndexCount: maxIndexCount,
+            currentIndex: currentSpaceInfo.keyboardFocusSpace?.number
+        ) { [weak self] updatedLabels, updatedMaxIndexCount in
+            self?.saveIndexLabels(updatedLabels, maxIndexCount: updatedMaxIndexCount)
         }
-        namesPanelController = controller
+        labelsPanelController = controller
         NSApp.activate(ignoringOtherApps: true)
         controller.showWindow(nil)
         controller.window?.makeKeyAndOrderFront(nil)
     }
 
-    private func saveSpaceNames(_ updatedNames: [String: String], for spaces: [Space]) {
-        var names = defaults.dictionary(forKey: Preference.spaceNames) as? [String: String] ?? [:]
-        for space in spaces {
-            names.removeValue(forKey: space.uuid)
-        }
-        names.merge(updatedNames) { _, updated in updated }
-        defaults.set(names, forKey: Preference.spaceNames)
+    private func saveIndexLabels(_ labels: [String: String], maxIndexCount: Int) {
+        defaults.set(labels, forKey: Preference.indexLabels)
+        defaults.set(maxIndexCount, forKey: Preference.maxIndexCount)
         updateMenuImage(spaceInfo: currentSpaceInfo)
     }
 
     private func currentMenuSignature() -> String {
-        let names = defaults.dictionary(forKey: Preference.spaceNames) as? [String: String] ?? [:]
+        let labels = defaults.dictionary(forKey: Preference.indexLabels) as? [String: String] ?? [:]
         let spaces = currentSpaceInfo.allSpaces.map {
-            "\($0.uuid):\($0.number.map(String.init) ?? "F"):\(names[$0.uuid] ?? "")"
+            let index = $0.number.map(String.init) ?? "F"
+            return "\($0.uuid):\(index):\(labels[index] ?? "")"
         }.joined(separator: "|")
         return "\(currentSpaceInfo.keyboardFocusSpace?.uuid ?? "")|\(spaces)"
     }
@@ -412,36 +406,41 @@ class StatusItem: NSObject {
     }
 }
 
-private final class SpaceNamesPanelController: NSWindowController {
+private final class IndexLabelsPanelController: NSWindowController {
 
-    private let spaces: [Space]
-    private let originalNames: [String: String]
-    private let currentUUID: String?
-    private let onSave: ([String: String]) -> Void
-    private var fields: [String: NSTextField] = [:]
+    private static let minimumIndexCount = 1
+    private static let maximumIndexCount = 999
 
-    init(spaces: [Space],
-         names: [String: String],
-         currentUUID: String?,
-         onSave: @escaping ([String: String]) -> Void) {
-        self.spaces = spaces
-        self.originalNames = names
-        self.currentUUID = currentUUID
+    private let currentIndex: Int?
+    private let onSave: ([String: String], Int) -> Void
+    private var draftLabels: [String: String]
+    private var maxIndexCount: Int
+    private var fields: [Int: NSTextField] = [:]
+    private var scrollView: NSScrollView!
+    private var countField: NSTextField!
+    private var countStepper: NSStepper!
+
+    init(labels: [String: String],
+         maxIndexCount: Int,
+         currentIndex: Int?,
+         onSave: @escaping ([String: String], Int) -> Void) {
+        self.draftLabels = labels
+        self.maxIndexCount = min(max(maxIndexCount, Self.minimumIndexCount),
+                                 Self.maximumIndexCount)
+        self.currentIndex = currentIndex
         self.onSave = onSave
 
-        let visibleRows = min(max(spaces.count, 3), 10)
-        let height = CGFloat(visibleRows * 34 + 130)
-        let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 460, height: height),
+        let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 460, height: 510),
                             styleMask: [.titled, .closable],
                             backing: .buffered,
                             defer: false)
-        panel.title = "Space Names"
+        panel.title = "Index Icons"
         panel.level = .floating
         panel.isReleasedWhenClosed = false
         panel.center()
 
         super.init(window: panel)
-        buildContent(width: 460, height: height)
+        buildContent(width: 460, height: 510)
     }
 
     required init?(coder: NSCoder) {
@@ -453,27 +452,71 @@ private final class SpaceNamesPanelController: NSWindowController {
         let content = NSView(frame: NSRect(x: 0, y: 0, width: width, height: height))
         window.contentView = content
 
-        let help = NSTextField(labelWithString: "Name every Space in one place. Empty names use the numeric index.")
+        let help = NSTextField(labelWithString: "Icons and names follow the numeric index, not the macOS Space ID.")
         help.frame = NSRect(x: 20, y: height - 42, width: width - 40, height: 20)
         help.textColor = .secondaryLabelColor
         content.addSubview(help)
 
-        let scroll = NSScrollView(frame: NSRect(x: 20, y: 62, width: width - 40, height: height - 116))
-        scroll.hasVerticalScroller = spaces.count > 10
-        scroll.borderType = .bezelBorder
-        scroll.autohidesScrollers = true
+        let countLabel = NSTextField(labelWithString: "Max Index Count:")
+        countLabel.frame = NSRect(x: 20, y: height - 76, width: 120, height: 22)
+        content.addSubview(countLabel)
 
+        let formatter = NumberFormatter()
+        formatter.allowsFloats = false
+        formatter.minimum = NSNumber(value: Self.minimumIndexCount)
+        formatter.maximum = NSNumber(value: Self.maximumIndexCount)
+
+        countField = NSTextField(frame: NSRect(x: 142, y: height - 79, width: 58, height: 24))
+        countField.formatter = formatter
+        countField.integerValue = maxIndexCount
+        countField.target = self
+        countField.action = #selector(changeIndexCountFromField(_:))
+        content.addSubview(countField)
+
+        countStepper = NSStepper(frame: NSRect(x: 204, y: height - 80, width: 19, height: 27))
+        countStepper.minValue = Double(Self.minimumIndexCount)
+        countStepper.maxValue = Double(Self.maximumIndexCount)
+        countStepper.increment = 1
+        countStepper.integerValue = maxIndexCount
+        countStepper.valueWraps = false
+        countStepper.autorepeat = true
+        countStepper.target = self
+        countStepper.action = #selector(changeIndexCountFromStepper(_:))
+        content.addSubview(countStepper)
+
+        scrollView = NSScrollView(frame: NSRect(x: 20, y: 62, width: width - 40, height: height - 154))
+        scrollView.borderType = .bezelBorder
+        scrollView.autohidesScrollers = true
+        content.addSubview(scrollView)
+        rebuildRows()
+
+        let cancel = NSButton(title: "Cancel", target: self, action: #selector(cancel(_:)))
+        cancel.frame = NSRect(x: width - 190, y: 18, width: 80, height: 30)
+        cancel.keyEquivalent = "\u{1b}"
+        content.addSubview(cancel)
+
+        let save = NSButton(title: "Save", target: self, action: #selector(save(_:)))
+        save.frame = NSRect(x: width - 100, y: 18, width: 80, height: 30)
+        save.keyEquivalent = "\r"
+        content.addSubview(save)
+
+        window.initialFirstResponder = currentIndex.flatMap { fields[$0] } ?? fields[1]
+    }
+
+    private func rebuildRows() {
         let rowHeight: CGFloat = 34
-        let documentHeight = max(scroll.contentSize.height, CGFloat(spaces.count) * rowHeight + 8)
+        let documentHeight = max(scrollView.contentSize.height,
+                                 CGFloat(maxIndexCount) * rowHeight + 8)
         let document = FlippedView(frame: NSRect(x: 0,
                                                   y: 0,
-                                                  width: scroll.contentSize.width,
+                                                  width: scrollView.contentSize.width,
                                                   height: documentHeight))
+        fields.removeAll()
 
-        for (index, space) in spaces.enumerated() {
-            let y = CGFloat(index) * rowHeight + 6
-            var labelText = space.number.map { "Space \($0)" } ?? "Fullscreen Space"
-            if space.uuid == currentUUID {
+        for index in 1...maxIndexCount {
+            let y = CGFloat(index - 1) * rowHeight + 6
+            var labelText = "Index \(index)"
+            if index == currentIndex {
                 labelText += "  • Current"
             }
 
@@ -486,31 +529,46 @@ private final class SpaceNamesPanelController: NSWindowController {
                                                    y: y,
                                                    width: document.frame.width - 178,
                                                    height: 24))
-            field.stringValue = originalNames[space.uuid] ?? ""
-            field.placeholderString = space.number.map(String.init) ?? "F"
-            field.toolTip = "You can paste Nerd Font glyphs here."
-            field.font = nameFieldFont()
+            field.stringValue = draftLabels[String(index)] ?? ""
+            field.placeholderString = String(index)
+            field.toolTip = "Paste a Nerd Font glyph, icon, or name. Empty values use the index number."
+            field.font = labelFieldFont()
             document.addSubview(field)
-            fields[space.uuid] = field
+            fields[index] = field
         }
 
-        scroll.documentView = document
-        content.addSubview(scroll)
-
-        let cancel = NSButton(title: "Cancel", target: self, action: #selector(cancel(_:)))
-        cancel.frame = NSRect(x: width - 190, y: 18, width: 80, height: 30)
-        cancel.keyEquivalent = "\u{1b}"
-        content.addSubview(cancel)
-
-        let save = NSButton(title: "Save", target: self, action: #selector(save(_:)))
-        save.frame = NSRect(x: width - 100, y: 18, width: 80, height: 30)
-        save.keyEquivalent = "\r"
-        content.addSubview(save)
-
-        window.initialFirstResponder = currentUUID.flatMap { fields[$0] } ?? fields[spaces.first?.uuid ?? ""]
+        scrollView.hasVerticalScroller = maxIndexCount > 10
+        scrollView.documentView = document
     }
 
-    private func nameFieldFont() -> NSFont {
+    private func captureLabels() {
+        for (index, field) in fields {
+            let label = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            if label.isEmpty {
+                draftLabels.removeValue(forKey: String(index))
+            } else {
+                draftLabels[String(index)] = label
+            }
+        }
+    }
+
+    private func updateMaxIndexCount(_ value: Int) {
+        captureLabels()
+        maxIndexCount = min(max(value, Self.minimumIndexCount), Self.maximumIndexCount)
+        countField.integerValue = maxIndexCount
+        countStepper.integerValue = maxIndexCount
+        rebuildRows()
+    }
+
+    @objc private func changeIndexCountFromField(_ sender: NSTextField) {
+        updateMaxIndexCount(sender.integerValue)
+    }
+
+    @objc private func changeIndexCountFromStepper(_ sender: NSStepper) {
+        updateMaxIndexCount(sender.integerValue)
+    }
+
+    private func labelFieldFont() -> NSFont {
         guard let family = UserDefaults.standard.string(forKey: Preference.fontFamily),
               !family.isEmpty
         else { return NSFont.systemFont(ofSize: 13) }
@@ -521,14 +579,15 @@ private final class SpaceNamesPanelController: NSWindowController {
     }
 
     @objc private func save(_ sender: NSButton) {
-        var names: [String: String] = [:]
-        for (uuid, field) in fields {
-            let name = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !name.isEmpty {
-                names[uuid] = name
+        updateMaxIndexCount(countField.integerValue)
+        captureLabels()
+        var labels: [String: String] = [:]
+        for index in 1...maxIndexCount {
+            if let label = draftLabels[String(index)], !label.isEmpty {
+                labels[String(index)] = label
             }
         }
-        onSave(names)
+        onSave(labels, maxIndexCount)
         close()
     }
 
