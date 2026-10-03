@@ -54,9 +54,7 @@ class ButtonImage {
         case .perSpace:
             let currentUUID = spaceInfo.keyboardFocusSpace?.uuid
             let spaces = spaceInfo.allSpaces.filter {
-                // Keep the visible Space from every display. Previously this only
-                // kept the keyboard-focus Space, so an empty visible Space on a
-                // secondary display disappeared from the item on the main display.
+                // Always show the current Space on each display, even when empty.
                 $0.isActive || $0.uuid == currentUUID || $0.hasApplicationWindows
             }
             let icons = spaces.map { space in

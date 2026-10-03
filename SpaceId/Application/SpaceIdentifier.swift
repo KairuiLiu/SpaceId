@@ -142,7 +142,7 @@ class SpaceIdentifier {
         return cgOccupiedSpaceIDs.contains(managedSpaceId)
     }
 
-    /* Returns the managed space IDs containing normal application windows. */
+    /* Returns the managed space IDs containing non-minimized, non-hidden application windows. */
     private func getOccupiedSpaceIDs() -> Set<Int> {
         let options: CGWindowListOption = [.optionAll, .excludeDesktopElements]
         guard let windows = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]]
@@ -156,6 +156,7 @@ class SpaceIdentifier {
                   layer.intValue == 0,
                   alpha.doubleValue > 0,
                   isRegularApplication(pid: ownerPID.int32Value),
+                  isWindowOrderedIn(windowID: windowID.uint32Value),
                   hasVisibleSize(window: window)
             else { return nil }
             return windowID
@@ -170,11 +171,18 @@ class SpaceIdentifier {
         return Set(spaceIDs.map { $0.intValue })
     }
 
+    private func isWindowOrderedIn(windowID: CGWindowID) -> Bool {
+        // Unlike kCGWindowIsOnscreen, ordered-in also includes normal windows
+        // on inactive Spaces, while excluding minimized and ordered-out windows.
+        var orderedIn: UInt8 = 0
+        return CGSWindowIsOrderedIn(conn, windowID, &orderedIn) == 0 && orderedIn != 0
+    }
+
     private func isRegularApplication(pid: pid_t) -> Bool {
         guard pid != ProcessInfo.processInfo.processIdentifier,
               let app = NSRunningApplication(processIdentifier: pid)
         else { return false }
-        return app.activationPolicy == .regular
+        return app.activationPolicy == .regular && !app.isHidden
     }
 
     private func hasVisibleSize(window: [String: Any]) -> Bool {
@@ -234,7 +242,11 @@ final class YabaiSpaceController {
         else { return YabaiSpaceData(indicesByUUID: indices, occupiedSpaceIndices: nil) }
 
         let occupiedIndices = Set(windowRecords.compactMap { window -> Int? in
-            guard !isGhostWindow(window),
+            // is-visible is also false on inactive Spaces. Those windows still
+            // count, as long as they are neither minimized nor hidden.
+            guard (window["is-minimized"] as? NSNumber)?.boolValue != true,
+                  (window["is-hidden"] as? NSNumber)?.boolValue != true,
+                  !isGhostWindow(window),
                   let space = window["space"] as? NSNumber,
                   space.intValue > 0
             else { return nil }

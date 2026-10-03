@@ -25,7 +25,6 @@ class StatusItem: NSObject {
             button.target = self
             button.action = #selector(handleStatusItemAction(_:))
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
-            button.toolTip = "Left click a label to switch Space. Scroll through occupied Spaces. Right click for menu."
         }
         scrollEventMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) {
             [weak self] event in
